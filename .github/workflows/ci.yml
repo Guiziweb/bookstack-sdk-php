@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        bookstack-version: [
+          '25.07.2',  # July 2025 - Latest
+          '25.05.2',  # May 2025
+          '25.02.4',  # February 2025
+          '24.12.1',  # December 2024
+          '24.10.3',  # October 2024
+          '24.05.4',  # May 2024
+          '23.12.3',  # December 2023
+          '23.06.2',  # June 2023
+          '22.11.1'   # November 2022
+        ]
+      fail-fast: false
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Setup PHP
+      uses: shivammathur/setup-php@v2
+      with:
+        php-version: '8.2'
+        extensions: mbstring, xml, ctype, iconv, intl, pdo_mysql, curl
+        coverage: xdebug
+
+    - name: Install Composer dependencies
+      run: composer install --no-progress --prefer-dist --optimize-autoloader
+
+    - name: Setup test environment
+      run: cp .env.ci .env
+
+    - name: Start BookStack services
+      run: BOOKSTACK_VERSION=${{ matrix.bookstack-version }} docker compose -f docker-compose.ci.yml up -d
+
+    - name: Wait for BookStack initialization
+      run: |
+        echo "Waiting for BookStack initialization to complete..."
+        timeout 180 bash -c 'until docker compose -f docker-compose.ci.yml logs bookstack | grep "\[ls.io-init\] done"; do
+          echo "Still initializing..."
+          sleep 5
+        done'
+        echo "✅ BookStack initialization complete!"
+
+    - name: Create API tokens
+      run: |
+        source .env
+        echo "Generating bcrypt hash for API secret..."
+        SECRET_HASH=$(docker compose -f docker-compose.ci.yml exec -T bookstack php -r "echo password_hash('${BOOKSTACK_API_SECRET}', PASSWORD_BCRYPT);")
+        echo "Creating API token in database..."
+        mysql -h127.0.0.1 -P3306 -u${DB_USERNAME} -p${DB_PASSWORD} ${DB_DATABASE} -e "
+        INSERT IGNORE INTO api_tokens (name, token_id, secret, user_id, expires_at, created_at, updated_at)
+        VALUES ('CI Test Token', '${BOOKSTACK_API_KEY}', '$SECRET_HASH', 1, '2025-12-31', NOW(), NOW());"
+
+    - name: Run unit tests
+      run: make test-unit-coverage
+
+    - name: Run integration tests
+      run: make test-integration
+
+    - name: Run security audit
+      run: make security
+
+    - name: Run quality checks
+      run: make quality
+
+    - name: Cleanup
+      if: always()
+      run: docker compose -f docker-compose.ci.yml down -v

@@ -1,0 +1,33 @@
+# Dependencies
+/vendor/
+composer.lock
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# PHP
+*.log
+*.tmp
+
+# PHPUnit
+.phpunit.result.cache
+/coverage/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Claude Code
+.claude/
+
+# Cache
+/cache/
+.php-cs-fixer.cache
